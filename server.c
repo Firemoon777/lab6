@@ -4,18 +4,41 @@
 #include <string.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+
 #define BUFFER_SIZE 1024
+#define MAX 100
+
+enum status {
+	STATUS_IDLE = 0,
+	STATUS_BUZY = 1
+};
+
+struct p_t {
+	pid_t pid;
+	int status;
+};
+
+struct server_t {
+	struct p_t process[MAX];
+	int process_count;
+	int process_count_in_use;
+};
 
 int socket_fd;
+int mem_id;
+struct server_t *server;
 
 void sighandler(int signo) {
 	printf("\rClosing...\n");
 	close(socket_fd);
+	shmctl(mem_id, IPC_RMID, NULL);
 	_exit(0);
 }
 
@@ -112,11 +135,6 @@ int main() {
 	struct sockaddr_in server;
 	struct sigaction act;
 
-	/* setup SIGINT handler*/
-	memset(&act, 0, sizeof(struct sigaction));
-	act.sa_handler = sighandler;
-	sigaction(SIGINT, &act, NULL);
-	
 	/* create socket*/
 	socket_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if(socket_fd < 0) {
@@ -139,6 +157,21 @@ int main() {
 
 	/* listen */
 	listen(socket_fd, 5);
+
+	/* setup shared memory */
+	mem_id = shmget(IPC_PRIVATE, 
+			sizeof(struct server_t), 
+			IPC_CREAT | 0644);
+	if(mem_id < 0) {
+		perror("shmget");
+		return 3;
+	}
+
+	
+	/* setup SIGINT handler*/
+	memset(&act, 0, sizeof(struct sigaction));
+	act.sa_handler = sighandler;
+	sigaction(SIGINT, &act, NULL);
 
 	/* magic { */
 
