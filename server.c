@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <sys/msg.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -25,6 +26,11 @@ struct p_t {
 	int status;
 };
 
+struct msg_t {
+	long pid;
+	int status;
+};
+
 struct server_t {
 	struct p_t process[MAX];
 	int process_count;
@@ -33,7 +39,7 @@ struct server_t {
 
 int socket_fd;
 int mem_id;
-struct server_t *server;
+struct server_t* server_data;
 
 void sighandler(int signo) {
 	printf("\rClosing...\n");
@@ -165,6 +171,11 @@ int main() {
 	if(mem_id < 0) {
 		perror("shmget");
 		return 3;
+	}
+	server_data = (struct server_t*)shmat(mem_id, NULL, 0);
+	if(server_data == NULL) {
+		perror("shmat");
+		return 4;
 	}
 
 	
