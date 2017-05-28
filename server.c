@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <errno.h>
+#include <signal.h>
 #include <string.h>
 #include <dirent.h>
 #include <unistd.h>
@@ -11,6 +12,12 @@
 #define BUFFER_SIZE 1024
 
 int socket_fd;
+
+void sighandler(int signo) {
+	printf("\rClosing...\n");
+	close(socket_fd);
+	_exit(0);
+}
 
 void worker() {
 	int client_fd;
@@ -103,6 +110,12 @@ void worker() {
 
 int main() {
 	struct sockaddr_in server;
+	struct sigaction act;
+
+	/* setup SIGINT handler*/
+	memset(&act, 0, sizeof(struct sigaction));
+	act.sa_handler = sighandler;
+	sigaction(SIGINT, &act, NULL);
 	
 	/* create socket*/
 	socket_fd = socket(AF_INET, SOCK_STREAM, 0);
