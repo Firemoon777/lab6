@@ -12,7 +12,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-
 #define BUFFER_SIZE 1024
 #define MAX 100
 
@@ -39,11 +38,13 @@ struct server_t {
 
 int socket_fd;
 int mem_id;
+int msg_id;
 struct server_t* server_data;
 
 void sighandler(int signo) {
 	printf("\rClosing...\n");
 	close(socket_fd);
+	msgctl(msg_id, IPC_RMID, NULL);
 	shmctl(mem_id, IPC_RMID, NULL);
 	_exit(0);
 }
@@ -167,7 +168,7 @@ int main() {
 	/* setup shared memory */
 	mem_id = shmget(IPC_PRIVATE, 
 			sizeof(struct server_t), 
-			IPC_CREAT | 0644);
+			IPC_CREAT | 0600);
 	if(mem_id < 0) {
 		perror("shmget");
 		return 3;
@@ -178,6 +179,12 @@ int main() {
 		return 4;
 	}
 
+	/* setup message queue */
+	msg_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
+	if(msg_id < 0) { 
+		perror("msgget");
+		return 5;
+	}
 	
 	/* setup SIGINT handler*/
 	memset(&act, 0, sizeof(struct sigaction));
