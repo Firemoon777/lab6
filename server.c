@@ -20,7 +20,8 @@
 enum status {
 	STATUS_IDLE = 0,
 	STATUS_BUZY = 1,
-	STATUS_KILL = 2
+	STATUS_KILL = 2,
+	STATUS_DEAD = 3
 };
 
 struct p_t {
@@ -63,9 +64,14 @@ void worker() {
 	size_t d_name_len, i;
 	struct msg_t msg;
 	
-	msg.uid = process_uid;
+	msg.uid = process_uid+1;
 
 	while(1) {
+		if(server_data->process[process_uid].status == STATUS_KILL) {
+			server_data->process[process_uid].status = STATUS_DEAD;
+			msgsnd(msg_id, &msg, sizeof(msg), 0);
+			_exit(0);
+		}
 		if(server_data->process[process_uid].status == STATUS_BUZY) {
 			server_data->process[process_uid].status = STATUS_IDLE;
 			msgsnd(msg_id, &msg, sizeof(msg), 0);
@@ -150,8 +156,44 @@ void worker() {
 	}
 }
 
+void fork_worker(int k) {
+	int i, j;
+	struct sigaction act;
+	memset(&act, 0, sizeof(struct sigaction));
+	/* fork-magic { */
+	for(i = 0; i < k; i++) {
+		int pid;
+		for(j = 0; j < server_data->process_count; j++) {
+			if(server_data->process[j].status == STATUS_DEAD) {
+				break;
+			}
+		}
+		process_uid = j;
+		pid = fork();
+		switch(pid) {
+			case -1:
+				/* oops */
+				perror("fork");
+				_exit(6);
+			case 0:
+				/* set default handler */ 
+				sigaction(SIGINT, &act, NULL);
+				/* launch service */
+				worker();
+				break;			
+			default:
+				/* Okay, one more process forked */
+				printf("fork %i success\n", process_uid);
+				/* write our pid */
+				server_data->process[process_uid].pid = pid;
+				server_data->process_count++;
+				break;
+		}
+	}
+}
+
 int main() {
-	int i;
+	int free_p, i;
 	struct sockaddr_in server;
 	struct sigaction act;
 
@@ -191,6 +233,8 @@ int main() {
 		perror("shmat");
 		return 4;
 	}
+	server_data->process_count = 0;
+	server_data->process_count_in_use = 0;
 
 	/* setup message queue */
 	msg_id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
@@ -199,29 +243,7 @@ int main() {
 		return 5;
 	}
 	
-	/* fork-magic { */
-	for(i = 0; i < K - 1; i++) {
-		int pid = fork();
-		process_uid++;
-		switch(pid) {
-			case -1:
-				/* oops */
-				perror("fork");
-				return 6;
-			case 0:
-				/* launch service */
-				worker();
-				break;			
-			default:
-				/* Okay, one more process forked */
-				printf("fork %i success\n", process_uid);
-				/* write our pid */
-				server_data->process[process_uid].pid = pid;
-				server_data->process_count++;
-				break;
-		}
-	}
-	/* } */
+	fork_worker(K - 1);
 
 	/* setup SIGINT handler*/
 	memset(&act, 0, sizeof(struct sigaction));
@@ -229,11 +251,37 @@ int main() {
 	sigaction(SIGINT, &act, NULL);
 
 	printf("Main process idle\n");
+	free_p = server_data->process_count;
 
 	while(1) {
 		struct msg_t msg;
 		msgrcv(msg_id, &msg, sizeof(struct msg_t), 0, 0);
+		msg.uid--;
 		printf("Msg from %li\n", msg.uid);
+		if(server_data->process[msg.uid].status == STATUS_BUZY) {
+			server_data->process_count_in_use++;
+		}
+		if(server_data->process[msg.uid].status == STATUS_IDLE) {
+			server_data->process_count_in_use--;
+		}
+		free_p = server_data->process_count - server_data->process_count_in_use;
+
+		if(free_p < N) {
+			printf("Time to fork!\n");
+			fork_worker(K - N);
+		}
+
+		if(free_p > K) {
+			printf("Time to kill!\n");
+
+		}
+
+		printf("All: %i\n", server_data->process_count);
+		printf("in_use: %i\n", server_data->process_count_in_use);
+		for(i = 0; i < server_data->process_count; i++) {
+			printf("> %i = status%i\n", i, server_data->process[i].status);
+		}
+		
 	}
 
 	return 0;
