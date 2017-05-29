@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <string.h>
 #include <dirent.h>
@@ -11,6 +12,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+
 
 #define BUFFER_SIZE 1024
 #define N 3
@@ -35,6 +37,7 @@ struct msg_t {
 
 struct server_t {
 	struct p_t process[MAX];
+	int size;
 	int process_count;
 	int process_count_in_use;
 };
@@ -67,33 +70,38 @@ void worker() {
 	msg.uid = process_uid+1;
 
 	while(1) {
+		if(server_data->process[process_uid].status == STATUS_BUZY) {
+			server_data->process[process_uid].status = STATUS_IDLE;
+			msgsnd(msg_id, &msg, sizeof(msg), 0);
+		}
 		if(server_data->process[process_uid].status == STATUS_KILL) {
 			server_data->process[process_uid].status = STATUS_DEAD;
 			msgsnd(msg_id, &msg, sizeof(msg), 0);
 			_exit(0);
 		}
-		if(server_data->process[process_uid].status == STATUS_BUZY) {
-			server_data->process[process_uid].status = STATUS_IDLE;
-			msgsnd(msg_id, &msg, sizeof(msg), 0);
-		}
 		client_fd = accept(socket_fd, 
 				(struct socketaddr*)&client,
 			 	&client_len);
 		if(client_fd < 0) {
-			perror("accept");
+			if(errno != EWOULDBLOCK) {
+				perror("accept");
+			}
 			continue;
 		}
 		server_data->process[process_uid].status = STATUS_BUZY;
 		msgsnd(msg_id, &msg, sizeof(msg), 0);
-		fprintf(stderr, "[%3i]accepted\n", process_uid);
+		fprintf(stderr, "[%3i]accepted^ %i\n", process_uid, client_fd);
 
 		/* buffered input? */
 		/* one dirent per one line */
-		buf_len = read(client_fd, buf, BUFFER_SIZE);
-		if(buf_len < 0) {
-			perror("read");
-			close(client_fd);
-			continue;
+		buf_len = 0;
+		while(buf_len <= 0) {
+			buf_len = read(client_fd, buf, BUFFER_SIZE);
+			if(buf_len < 0 && errno != EWOULDBLOCK) {
+				perror("read");
+				close(client_fd);
+				continue;
+			}
 		}
 		if(buf[buf_len-1] == '\n') 
 			buf_len--;
@@ -163,7 +171,7 @@ void fork_worker(int k) {
 	/* fork-magic { */
 	for(i = 0; i < k; i++) {
 		int pid;
-		for(j = 0; j < server_data->process_count; j++) {
+		for(j = 0; j < server_data->size; j++) {
 			if(server_data->process[j].status == STATUS_DEAD) {
 				break;
 			}
@@ -187,13 +195,14 @@ void fork_worker(int k) {
 				/* write our pid */
 				server_data->process[process_uid].pid = pid;
 				server_data->process_count++;
+				server_data->size++;
 				break;
 		}
 	}
 }
 
 int main() {
-	int free_p, i;
+	int free_p, i, flags;
 	struct sockaddr_in server;
 	struct sigaction act;
 
@@ -216,6 +225,10 @@ int main() {
 		perror("bind");
 		return 2;
 	}
+
+	/* set non-blocking flag */
+	flags = fcntl(socket_fd, F_GETFL, 0);
+	fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
 
 	/* listen */
 	listen(socket_fd, 5);
@@ -258,6 +271,9 @@ int main() {
 		msgrcv(msg_id, &msg, sizeof(struct msg_t), 0, 0);
 		msg.uid--;
 		printf("Msg from %li\n", msg.uid);
+		if(server_data->process[msg.uid].status == STATUS_DEAD) {
+			server_data->process_count--;
+		}
 		if(server_data->process[msg.uid].status == STATUS_BUZY) {
 			server_data->process_count_in_use++;
 		}
@@ -273,12 +289,18 @@ int main() {
 
 		if(free_p > K) {
 			printf("Time to kill!\n");
-
+			for(i = 0; i < server_data->size; i++) {
+				if(server_data->process[i].status == STATUS_IDLE) {
+					printf("i will kill %i\n", i);
+					server_data->process[i].status = STATUS_KILL;
+					break;
+				}
+			}
 		}
 
 		printf("All: %i\n", server_data->process_count);
 		printf("in_use: %i\n", server_data->process_count_in_use);
-		for(i = 0; i < server_data->process_count; i++) {
+		for(i = 0; i < server_data->size; i++) {
 			printf("> %i = status%i\n", i, server_data->process[i].status);
 		}
 		
