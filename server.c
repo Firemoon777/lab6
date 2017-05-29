@@ -19,7 +19,8 @@
 
 enum status {
 	STATUS_IDLE = 0,
-	STATUS_BUZY = 1
+	STATUS_BUZY = 1,
+	STATUS_KILL = 2
 };
 
 struct p_t {
@@ -28,8 +29,7 @@ struct p_t {
 };
 
 struct msg_t {
-	long pid;
-	int status;
+	long uid;
 };
 
 struct server_t {
@@ -61,8 +61,15 @@ void worker() {
 	DIR* dir;
 	struct dirent* dirent;
 	size_t d_name_len, i;
+	struct msg_t msg;
+	
+	msg.uid = process_uid;
 
 	while(1) {
+		if(server_data->process[process_uid].status == STATUS_BUZY) {
+			server_data->process[process_uid].status = STATUS_IDLE;
+			msgsnd(msg_id, &msg, sizeof(msg), 0);
+		}
 		client_fd = accept(socket_fd, 
 				(struct socketaddr*)&client,
 			 	&client_len);
@@ -70,6 +77,8 @@ void worker() {
 			perror("accept");
 			continue;
 		}
+		server_data->process[process_uid].status = STATUS_BUZY;
+		msgsnd(msg_id, &msg, sizeof(msg), 0);
 		fprintf(stderr, "[%3i]accepted\n", process_uid);
 
 		/* buffered input? */
@@ -222,6 +231,9 @@ int main() {
 	printf("Main process idle\n");
 
 	while(1) {
+		struct msg_t msg;
+		msgrcv(msg_id, &msg, sizeof(struct msg_t), 0, 0);
+		printf("Msg from %li\n", msg.uid);
 	}
 
 	return 0;
