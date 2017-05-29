@@ -190,11 +190,6 @@ int main() {
 		return 5;
 	}
 	
-	/* setup SIGINT handler*/
-	memset(&act, 0, sizeof(struct sigaction));
-	act.sa_handler = sighandler;
-	sigaction(SIGINT, &act, NULL);
-
 	/* fork-magic { */
 	for(i = 0; i < K - 1; i++) {
 		int pid = fork();
@@ -218,6 +213,12 @@ int main() {
 		}
 	}
 	/* } */
+
+	/* setup SIGINT handler*/
+	memset(&act, 0, sizeof(struct sigaction));
+	act.sa_handler = sighandler;
+	sigaction(SIGINT, &act, NULL);
+
 	printf("Main process idle\n");
 
 	while(1) {
