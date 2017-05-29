@@ -18,6 +18,7 @@
 #define N 3
 #define K 5
 #define MAX 100
+#define PORT 58015
 
 enum status {
 	STATUS_IDLE = 0,
@@ -216,7 +217,7 @@ int main() {
 	/* prepare to bind */
 	server.sin_family = AF_INET;
 	server.sin_addr.s_addr = INADDR_ANY;
-	server.sin_port = htons(58015);
+	server.sin_port = htons(PORT);
 
 	/* bind */
 	if(bind(socket_fd, 
