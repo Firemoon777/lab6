@@ -13,6 +13,8 @@
 #include <netinet/in.h>
 
 #define BUFFER_SIZE 1024
+#define N 3
+#define K 5
 #define MAX 100
 
 enum status {
@@ -39,6 +41,7 @@ struct server_t {
 int socket_fd;
 int mem_id;
 int msg_id;
+int process_uid = 0;
 struct server_t* server_data;
 
 void sighandler(int signo) {
@@ -67,7 +70,7 @@ void worker() {
 			perror("accept");
 			continue;
 		}
-		fprintf(stderr, "accepted\n");
+		fprintf(stderr, "[%3i]accepted\n", process_uid);
 
 		/* buffered input? */
 		/* one dirent per one line */
@@ -82,7 +85,7 @@ void worker() {
 		if(buf[buf_len-1] == '\r') 
 			buf_len--;
 		buf[buf_len] = '\0';
-		fprintf(stderr, "request: \"%s\"\n", buf);
+		fprintf(stderr, "[%3i]request: \"%s\"\n", process_uid, buf);
 
 		/* try to open dir */
 		dir = opendir(buf);
@@ -134,11 +137,12 @@ void worker() {
 		/* close everything */
 		closedir(dir);
 		close(client_fd);
-		fprintf(stderr, "closed\n");
+		fprintf(stderr, "[%3i]closed\n", process_uid);
 	}
 }
 
 int main() {
+	int i;
 	struct sockaddr_in server;
 	struct sigaction act;
 
@@ -191,10 +195,33 @@ int main() {
 	act.sa_handler = sighandler;
 	sigaction(SIGINT, &act, NULL);
 
-	/* magic { */
-
+	/* fork-magic { */
+	for(i = 0; i < K - 1; i++) {
+		int pid = fork();
+		process_uid++;
+		switch(pid) {
+			case -1:
+				/* oops */
+				perror("fork");
+				return 6;
+			case 0:
+				/* launch service */
+				worker();
+				break;			
+			default:
+				/* Okay, one more process forked */
+				printf("fork %i success\n", process_uid);
+				/* write our pid */
+				server_data->process[process_uid].pid = pid;
+				server_data->process_count++;
+				break;
+		}
+	}
 	/* } */
+	printf("Main process idle\n");
 
-	worker();
+	while(1) {
+	}
+
 	return 0;
 }
